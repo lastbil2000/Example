@@ -1,5 +1,12 @@
-// (c) tord wessman 2012
-// feel free to do what you like with code.
+// (c) Tord Wessman 2012
+// Feel free to do what you like with code.
+// 
+// This example demonstrate how to link several elements to a 
+// espeak gst-plugin source to create a baby-like robot voice.
+//
+// This example was taken from another context (where i use the interop
+// services in C# to create a C# wrapper) and is therefore not used
+// here.
 
 #include "espeak_stream.h"
 
@@ -7,9 +14,14 @@ static GMainLoop *loop;
 
 static GstElement *bin, 	// the containing all the elements
 		*pipeline, 	 		// the pipeline for the bin
-		*espeak,
-		*alsa_sink;
-
+		*espeak,			// the espeak sink
+		*convert0,
+		*convert1,
+		*convert2,
+		*effect0,			// using speed filter from gst-bad
+		*effect1,			// using audiocheblimit filter from gst-good
+		*alsa_sink;			// sound card sink
+	
 static GstBus *bus;	//the bus element te transport messages from/to the pipeline
 
 static int is_playing; //indicates that the player is busy
@@ -22,7 +34,6 @@ static gboolean bus_call(GstBus *bus, GstMessage *msg, void *user_data)
 	switch (GST_MESSAGE_TYPE(msg)) {
 	case GST_MESSAGE_EOS: {
 		//g_message("End-of-stream");
-		//report the end of stream
 		g_main_loop_quit(loop);
 		break;
 	}
@@ -74,23 +85,40 @@ static gboolean bus_call(GstBus *bus, GstMessage *msg, void *user_data)
 int init() {
 	gst_init (NULL, NULL);
 	pitch = 100;
-	rate = 0;
+	rate = -100;
 
 	// create the main loop
 	loop = g_main_loop_new(NULL, FALSE);
 
 	pipeline = gst_pipeline_new ("espeak_pipeline");
 	bin = gst_bin_new ("espeak_bin");
-
+	
 	//initializing elements
 	espeak = gst_element_factory_make ("espeak", "espeak_src");
 	alsa_sink = gst_element_factory_make ("alsasink", "alsasink");
+	convert0 = gst_element_factory_make ("audioconvert", "converter0");
+	convert1 = gst_element_factory_make ("audioconvert", "converter1");
+	convert2 = gst_element_factory_make ("audioconvert", "converter2");
+
+	//creates and set the values for the speed filter	
+	effect0 = gst_element_factory_make ("speed", "testish");
+	g_object_set (G_OBJECT (effect0), "speed", 1.5, NULL);
+	
+	//creates and set the values for the cut off filter
+	effect1 = gst_element_factory_make ("audiocheblimit", "cheb-LPF");
+	g_object_set (G_OBJECT (effect1), "mode", 0, NULL);
+	g_object_set (G_OBJECT (effect1), "cutoff", 3500.0, NULL);
 
 	if (espeak == NULL || alsa_sink == NULL || pipeline == NULL || bin == NULL) {
 		printf ("Unable to create elements.");
 		return 0;
 	}
-
+	if (effect0 == NULL || effect1 == NULL) {
+		printf ("Unable to create effects");
+		return 0;
+	}
+	
+	//initializes the espeak src with values
 	g_object_set (G_OBJECT (espeak), "text", "", NULL);
 	g_object_set (G_OBJECT (espeak), "pitch", pitch, NULL);
 	g_object_set (G_OBJECT (espeak), "rate", rate, NULL);
@@ -106,6 +134,11 @@ int init() {
 	// Add the elements to the bin
 	gst_bin_add_many (GST_BIN (bin), 
 		espeak, 
+		convert0,
+		effect0,
+		convert1,
+		effect1,
+		convert2,
 		alsa_sink,
 	NULL);
 
@@ -114,10 +147,15 @@ int init() {
 
 	// link the elements and check for success
 	if (!gst_element_link_many (
-		espeak, 
+		espeak,
+		convert0,
+		effect0,
+		convert1, 
+		effect1,
+		convert2,
 		alsa_sink,
 	NULL)) {
-		printf ("KUNDE INTE LENKISH");
+		printf ("Unable to link elements");
 		return 0;
 	}
 
@@ -176,7 +214,6 @@ int _ext_get_pitch() {
 int _ext_get_rate() {
 	return rate;
 }
-// sudo apt-get install sudo apt-get install portaudio19-dev
 
 int main (int argc, char *argv[]) {
 
@@ -196,11 +233,3 @@ int main (int argc, char *argv[]) {
 	
 	return 0;
 }
-/*
-int main (int argc, char *argv[]) {
-	return 0;
-}
-int _ext_is_playing() { return 42; }
-int apx() {return 43;}
-
-*/
